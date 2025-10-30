@@ -1,5 +1,6 @@
 ﻿# views/tela_principal.py
 import customtkinter as ctk
+from views.cadastro_funcionario import abrir_tela_cadastro
 
 def criar_tela_principal(root):
     frame = ctk.CTkFrame(root)
@@ -16,7 +17,8 @@ def criar_tela_principal(root):
         frame,
         text="Cadastrar Funcionário",
         width=200,
-        height=40
+        height=40,
+        command=lambda: abrir_tela_cadastro(root)
     )
     btn_cadastro.pack(pady=10)
 
