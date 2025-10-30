@@ -7,30 +7,34 @@ from reportlab.lib.units import cm
 import os
 
 def gerar_folha(mes, ano, dados, logo_path="assets/timbrado.png", output="folha.pdf"):
-    doc = SimpleDocTemplate(output, pagesize=A4)
+    doc = SimpleDocTemplate(output, pagesize=A4, topMargin=1.5*cm)
     elements = []
     styles = getSampleStyleSheet()
 
-    # Logo (se existir)
+    # Logo
     if os.path.exists(logo_path):
-        img = Image(logo_path, width=15*cm, height=3*cm)
-        img.hAlign = "CENTER"
-        elements.append(img)
-        elements.append(Spacer(1, 20))
+        try:
+            img = Image(logo_path, width=15*cm, height=3*cm)
+            img.hAlign = "CENTER"
+            elements.append(img)
+            elements.append(Spacer(1, 20))
+        except:
+            pass
 
     # Título
     titulo = Paragraph(
-        "<font size=16><b>FOLHA DE PAGAMENTO FUNCIONÁRIOS DA “EMEIEF CEL NOGUEIRA COBRA”</b></font><br/>"
-        f"<font size=12>MÊS de Referência: – De 01/{mes.zfill(2)} a 31/{mes.zfill(2)} – {ano}</font>",
+        "<font size=14><b>FOLHA DE PAGAMENTO FUNCIONÁRIOS DA “EMEIEF CEL NOGUEIRA COBRA”</b></font><br/>"
+        f"<font size=11>MÊS de Referência: – De 01/{mes.zfill(2)} a 31/{mes.zfill(2)} – {ano}</font>",
         styles["Title"]
     )
     elements.append(titulo)
     elements.append(Spacer(1, 30))
 
     # Tabela
-    data = [["Nº", "Nome", "RG", "Cargo", "Contrato", "Carga Horária", "Observações"]]
+    header = ["Nº", "Nome", "RG", "Cargo", "Contrato", "Carga Horária", "Observações"]
+    data = [header]
     for i, f in enumerate(dados, 1):
-        obs = f["observacoes"] if f["observacoes"] else "FREQUENTE"
+        obs = f["observacoes"] if f["observacoes"].strip() else "FREQUENTE"
         data.append([str(i), f["nome"], f["rg"], f["cargo"], f["contrato"], f["carga_horaria"], obs])
 
     table = Table(data, colWidths=[1.2*cm, 5*cm, 2.5*cm, 3*cm, 2.5*cm, 3*cm, 5*cm])
@@ -41,9 +45,10 @@ def gerar_folha(mes, ano, dados, logo_path="assets/timbrado.png", output="folha.
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("FONTSIZE", (0,0), (-1,0), 10),
         ("BOTTOMPADDING", (0,0), (-1,0), 12),
-        ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#f0f0f0")),
+        ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#f8f9fa")),
         ("GRID", (0,0), (-1,-1), 0.5, colors.black),
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("FONTSIZE", (0,1), (-1,-1), 9),
     ]))
     elements.append(table)
     elements.append(Spacer(1, 60))
@@ -55,4 +60,9 @@ def gerar_folha(mes, ano, dados, logo_path="assets/timbrado.png", output="folha.
     elements.append(Paragraph("Assinatura do Diretor", styles["Normal"]))
 
     doc.build(elements)
-    os.startfile(output)  # Abre o PDF automaticamente
+
+    # Abre o PDF
+    try:
+        os.startfile(output)
+    except:
+        print(f"PDF salvo em: {os.path.abspath(output)}")
