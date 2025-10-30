@@ -1,44 +1,35 @@
 ﻿# views/cadastro_funcionario.py
 import customtkinter as ctk
-import tkinter.messagebox as msgbox  # <-- USA TKINTER NATIVO
+from CTkMessagebox import CTkMessagebox  # <-- AGORA FUNCIONA!
 from database.db import conectar
 
-def abrir_tela_cadastro(root):
+def abrir_tela_cadastro(root, atualizar_lista=None):
     janela = ctk.CTkToplevel(root)
-    janela.geometry("500x550")
+    janela.geometry("500x580")
     janela.title("Cadastrar Funcionário")
     janela.grab_set()
+    janela.focus()
 
-    # Campos
-    ctk.CTkLabel(janela, text="Nome:", font=("Arial", 12)).pack(pady=8)
-    entry_nome = ctk.CTkEntry(janela, width=320, placeholder_text="Ex: Maria Silva")
-    entry_nome.pack(pady=5)
+    # Campos com placeholder
+    campos = [
+        ("Nome completo:", "Ex: Maria Silva"),
+        ("RG:", "Ex: 12.345.678-9"),
+        ("Cargo/Função:", "Ex: Professora"),
+        ("Contrato:", "Ex: CLT"),
+        ("Carga Horária:", "Ex: 40h semanais")
+    ]
 
-    ctk.CTkLabel(janela, text="RG:", font=("Arial", 12)).pack(pady=8)
-    entry_rg = ctk.CTkEntry(janela, width=320, placeholder_text="Ex: 12345678")
-    entry_rg.pack(pady=5)
-
-    ctk.CTkLabel(janela, text="Cargo/Função:", font=("Arial", 12)).pack(pady=8)
-    entry_cargo = ctk.CTkEntry(janela, width=320, placeholder_text="Ex: Professora")
-    entry_cargo.pack(pady=5)
-
-    ctk.CTkLabel(janela, text="Contrato:", font=("Arial", 12)).pack(pady=8)
-    entry_contrato = ctk.CTkEntry(janela, width=320, placeholder_text="Ex: CLT")
-    entry_contrato.pack(pady=5)
-
-    ctk.CTkLabel(janela, text="Carga Horária:", font=("Arial", 12)).pack(pady=8)
-    entry_carga = ctk.CTkEntry(janela, width=320, placeholder_text="Ex: 40h semanais")
-    entry_carga.pack(pady=5)
+    entries = {}
+    for i, (label, placeholder) in enumerate(campos):
+        ctk.CTkLabel(janela, text=label, font=("Arial", 13, "bold")).pack(pady=(15,5))
+        entry = ctk.CTkEntry(janela, width=350, placeholder_text=placeholder, font=("Arial", 12))
+        entry.pack(pady=5)
+        entries[label] = entry
 
     def salvar():
-        nome = entry_nome.get().strip()
-        rg = entry_rg.get().strip()
-        cargo = entry_cargo.get().strip()
-        contrato = entry_contrato.get().strip()
-        carga = entry_carga.get().strip()
-
-        if not nome or not rg:
-            msgbox.showwarning("Atenção", "Nome e RG são obrigatórios!")
+        dados = {k: v.get().strip() for k, v in entries.items()}
+        if not dados["Nome completo:"] or not dados["RG:"]:
+            CTkMessagebox(title="Erro", message="Nome e RG são obrigatórios!", icon="cancel")
             return
 
         try:
@@ -47,25 +38,26 @@ def abrir_tela_cadastro(root):
             cursor.execute("""
             INSERT INTO funcionarios (nome, rg, cargo, contrato, carga_horaria)
             VALUES (?, ?, ?, ?, ?)
-            """, (nome, rg, cargo, contrato, carga))
+            """, (
+                dados["Nome completo:"],
+                dados["RG:"],
+                dados["Cargo/Função:"],
+                dados["Contrato:"],
+                dados["Carga Horária:"]
+            ))
             conn.commit()
             conn.close()
-            msgbox.showinfo("Sucesso", "Funcionário cadastrado com sucesso!")
+            CTkMessagebox(title="Sucesso!", message="Funcionário cadastrado!", icon="check")
             janela.destroy()
+            if atualizar_lista:
+                atualizar_lista()
         except Exception as e:
-            msgbox.showerror("Erro", f"Erro ao salvar:\n{str(e)}")
+            CTkMessagebox(title="Erro", message=f"Erro: {str(e)}", icon="cancel")
 
-    frame_botoes = ctk.CTkFrame(janela)
-    frame_botoes.pack(pady=20)
+    frame_btn = ctk.CTkFrame(janela)
+    frame_btn.pack(pady=25)
 
-    btn_salvar = ctk.CTkButton(
-        frame_botoes, text="Salvar", command=salvar,
-        fg_color="green", hover_color="darkgreen", width=140
-    )
-    btn_salvar.pack(side="left", padx=10)
-
-    btn_cancelar = ctk.CTkButton(
-        frame_botoes, text="Cancelar", command=janela.destroy,
-        fg_color="gray", hover_color="darkgray", width=140
-    )
-    btn_cancelar.pack(side="left", padx=10)
+    ctk.CTkButton(frame_btn, text="SALVAR", command=salvar,
+                  fg_color="green", hover_color="darkgreen", width=150).pack(side="left", padx=10)
+    ctk.CTkButton(frame_btn, text="CANCELAR", command=janela.destroy,
+                  fg_color="gray", hover_color="darkgray", width=150).pack(side="left", padx=10)
