@@ -1,25 +1,29 @@
 ﻿# views/tela_principal.py
 import customtkinter as ctk
-from customtkinter import CTkTable  # TABELA MODERNA
 from views.cadastro_funcionario import abrir_tela_cadastro
 from reports.gerar_pdf import gerar_folha
 from database.db import conectar
 from CTkMessagebox import CTkMessagebox
+import tkinter as tk
+from tkinter import ttk
+from ttkthemes import ThemedStyle
 
-def atualizar_tabela(table, conn):
+def atualizar_tabela(tree, conn):
+    # Limpa
+    for item in tree.get_children():
+        tree.delete(item)
+    
     cursor = conn.cursor()
     cursor.execute("SELECT nome, rg, cargo, contrato, carga_horaria FROM funcionarios")
-    dados = cursor.fetchall()
-    
-    # Limpa tabela
-    table.delete(*table.get_children())
-    
-    # Preenche
-    for row in dados:
-        table.insert("", "end", values=row)
+    for row in cursor.fetchall():
+        tree.insert("", "end", values=row)
 
 def criar_tela_principal(root):
     conn = conectar()
+
+    # Tema escuro para Treeview
+    style = ThemedStyle(root)
+    style.set_theme("equilux")  # Tema escuro bonito
 
     # Frame principal
     frame = ctk.CTkFrame(root)
@@ -39,38 +43,43 @@ def criar_tela_principal(root):
     ctk.CTkButton(
         frame_botoes,
         text="Cadastrar Funcionário",
-        command=lambda: abrir_tela_cadastro(root, lambda: atualizar_tabela(table, conn)),
-        fg_color="#1f6aa5", width=200
+        command=lambda: abrir_tela_cadastro(root, lambda: atualizar_tabela(tree, conn)),
+        fg_color="#1f6aa5", width=220
     ).pack(side="left", padx=15)
 
     ctk.CTkButton(
         frame_botoes,
         text="Gerar Folha de Pagamento",
         command=lambda: gerar_folha_dialog(),
-        fg_color="green", width=200
+        fg_color="green", width=220
     ).pack(side="left", padx=15)
 
-    # Tabela (CTkTable)
-    columns = ["Nome", "RG", "Cargo", "Contrato", "Carga Horária"]
-    table = CTkTable(
-        master=frame,
-        row=15,
-        column=5,
-        values=[columns],
-        header_color="#1f6aa5",
-        corner_radius=8
-    )
-    table.pack(pady=20, fill="both", expand=True)
+    # Treeview com tema
+    columns = ("nome", "rg", "cargo", "contrato", "carga_horaria")
+    tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)
+    
+    # Cabeçalhos
+    for col in columns:
+        nome_col = col.replace("_", " ").title()
+        tree.heading(col, text=nome_col)
+        tree.column(col, width=150, anchor="center")
 
-    # Atualiza tabela
-    atualizar_tabela(table, conn)
+    tree.pack(pady=20, fill="both", expand=True)
+
+    # Scrollbar
+    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+    scrollbar.pack(side="right", fill="y")
+    tree.configure(yscrollcommand=scrollbar.set)
+
+    # Atualiza lista
+    atualizar_tabela(tree, conn)
 
     def gerar_folha_dialog():
-        dialog = ctk.CTkInputDialog(text="Mês (ex: 08):", title="Mês da Folha")
+        dialog = ctk.CTkInputDialog(text="Mês (ex: 08):", title="Mês")
         mes = dialog.get_input()
         if not mes: return
 
-        dialog = ctk.CTkInputDialog(text="Ano (ex: 2025):", title="Ano da Folha")
+        dialog = ctk.CTkInputDialog(text="Ano (ex: 2025):", title="Ano")
         ano = dialog.get_input()
         if not ano: return
 
@@ -91,7 +100,7 @@ def criar_tela_principal(root):
             gerar_folha(mes, ano, dados)
             CTkMessagebox(title="Sucesso!", message="Folha gerada com sucesso!", icon="check")
         except Exception as e:
-            CTkMessagebox(title="Erro", message=f"Erro ao gerar PDF:\n{e}", icon="cancel")
+            CTkMessagebox(title="Erro", message=f"Erro: {e}", icon="cancel")
 
-    # Fecha conexão ao sair
+    # Fecha conexão
     root.protocol("WM_DELETE_WINDOW", lambda: (conn.close(), root.destroy()))
