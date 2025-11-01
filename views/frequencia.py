@@ -1,505 +1,420 @@
 import customtkinter as ctk
 from database.db import conectar
-from tkinter import ttk
-import tkinter.messagebox as tk_messagebox
-import tkinter as tk
+from tkinter import ttk, Listbox, simpledialog
+import tkinter.messagebox as messagebox
 import re
+from datetime import datetime, timedelta
 
-def abrir_tela_frequencia(root, atualizar_lista=None):
-    """Abre a janela de registro de faltas."""
-    janela = ctk.CTkToplevel(root)
-    janela.geometry("900x650")  # Tamanho inicial menor
-    janela.title("Registrar Faltas")
-    janela.transient(root)
-    janela.grab_set()
-    janela.focus_force()
-    
-    # Permitir maximizar
-    janela.minsize(900, 650)
-    janela.resizable(True, True)  # Permitir redimensionar
-
-    def safe_messagebox(kind: str, title: str, msg: str):
-        """Exibe mensagem com fallback seguro."""
-        try:
-            janela.focus_force()
-            if kind == "success":
-                tk_messagebox.showinfo(title, msg)
-            elif kind == "warn":
-                tk_messagebox.showwarning(title, msg)
-            else:
-                tk_messagebox.showerror(title, msg)
-        except tk.TclError:
-            print(f"{title}: {msg}")
-
-    # Conexão com banco
-    conn = conectar()
-    cursor = conn.cursor()
-    
-    # VERIFICAR E CRIAR COLUNA DETALHES SE NECESSÁRIO
-    try:
-        cursor.execute("PRAGMA table_info(frequencia)")
-        colunas = [col[1] for col in cursor.fetchall()]
-        if 'detalhes' not in colunas:
-            cursor.execute("ALTER TABLE frequencia ADD COLUMN detalhes TEXT")
-            conn.commit()
-            print("Coluna 'detalhes' adicionada à tabela frequencia")
-    except Exception as e:
-        print(f"Erro ao verificar coluna detalhes: {e}")
-
-    cursor.execute("SELECT id, nome FROM funcionarios ORDER BY nome")
-    funcs = cursor.fetchall()
-
-    if not funcs:
-        safe_messagebox("warn", "Aviso", "Cadastre funcionários primeiro!")
-        conn.close()
-        janela.destroy()
-        return
-
-    # Lista de justificativas padrão + personalizadas
-    justificativas_padrao = [
-        "AM", "AB", "TRE", "SOL", "Declaração", "INJ", "FH", 
-        "Folga Aniversário", "Atestado", "Falta Justificada", "Licença-Prêmio"
-    ]
-    
-    # Carregar justificativas personalizadas do banco (se existir)
-    justificativas_personalizadas = []
-    try:
-        cursor.execute("SELECT nome FROM justificativas_personalizadas")
-        justificativas_personalizadas = [row[0] for row in cursor.fetchall()]
-    except:
-        pass
-    
-    justificativas_completas = justificativas_padrao + justificativas_personalizadas
-
-    # ========== FRAME PRINCIPAL COM SCROLL ==========
-    # Frame principal que vai conter tudo
-    main_container = ctk.CTkFrame(janela)
-    main_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-    # Canvas para scroll
-    canvas = tk.Canvas(main_container, bg='#2b2b2b', highlightthickness=0)
-    scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
-    scrollable_frame = ctk.CTkFrame(canvas)
-
-    # Configurar o scroll
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
-
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
-
-    # Empacotar canvas e scrollbar
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-
-    # Configurar scroll com mouse wheel
-    def _on_mousewheel(event):
-        canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-    
-    canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-    # ========== CONTEÚDO DA JANELA ==========
-    # Título
-    ctk.CTkLabel(scrollable_frame, text="REGISTRAR FALTAS", 
-                font=("Arial", 18, "bold")).pack(pady=15)
-
-    # ========== PESQUISA DE FUNCIONÁRIO ==========
-    frame_pesquisa = ctk.CTkFrame(scrollable_frame)
-    frame_pesquisa.pack(pady=10, fill="x", padx=10)
-
-    ctk.CTkLabel(frame_pesquisa, text="Pesquisar Funcionário:", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 8))
-
-    entry_pesquisa = ctk.CTkEntry(frame_pesquisa, 
-                                 placeholder_text="Digite o nome do funcionário...", 
-                                 height=35, 
-                                 font=("Arial", 12))
-    entry_pesquisa.pack(fill="x", pady=5)
-    entry_pesquisa.focus()
-
-    # Lista de funcionários
-    frame_lista_funcs = ctk.CTkFrame(scrollable_frame)
-    frame_lista_funcs.pack(pady=10, fill="x", padx=10)
-
-    ctk.CTkLabel(frame_lista_funcs, text="Funcionários:", 
-                font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 5))
-
-    tree_funcs = ttk.Treeview(frame_lista_funcs, columns=("nome",), show="tree", height=6)
-    tree_funcs.heading("#0", text="Funcionários")
-    tree_funcs.column("#0", width=400)
-    tree_funcs.pack(side="left", fill="both", expand=True)
-
-    scrollbar_funcs = ttk.Scrollbar(frame_lista_funcs, orient="vertical", command=tree_funcs.yview)
-    scrollbar_funcs.pack(side="right", fill="y")
-    tree_funcs.configure(yscrollcommand=scrollbar_funcs.set)
-
-    # ========== FORMULÁRIO DE FALTAS ==========
-    frame_form = ctk.CTkFrame(scrollable_frame)
-    frame_form.pack(pady=15, fill="x", padx=10)
-
-    ctk.CTkLabel(frame_form, text="Dados da Falta:", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 10))
-
-    # Linha 1 - Data
-    frame_data = ctk.CTkFrame(frame_form)
-    frame_data.pack(fill="x", pady=8, padx=10)
-
-    ctk.CTkLabel(frame_data, text="Data (DD/MM/AAAA):", 
-                font=("Arial", 12, "bold"), width=180).pack(side="left", padx=(0, 10))
-    
-    entry_data = ctk.CTkEntry(frame_data, 
-                             width=150, 
-                             placeholder_text="15/08/2025", 
-                             height=35,
-                             font=("Arial", 12))
-    entry_data.pack(side="left")
-
-    # Linha 2 - Justificativa
-    frame_just = ctk.CTkFrame(frame_form)
-    frame_just.pack(fill="x", pady=8, padx=10)
-
-    ctk.CTkLabel(frame_just, text="Justificativa:", 
-                font=("Arial", 12, "bold"), width=180).pack(side="left", padx=(0, 10))
-    
-    combo_just = ctk.CTkComboBox(frame_just, 
-                                values=justificativas_completas, 
-                                width=250, 
-                                height=35,
-                                font=("Arial", 12))
-    combo_just.pack(side="left", padx=(0, 10))
-    combo_just.set("AM")
-    
-    btn_nova_just = ctk.CTkButton(frame_just, 
-                                 text="+ Nova", 
-                                 width=80, 
-                                 height=35,
-                                 command=lambda: adicionar_justificativa(),
-                                 fg_color="#4CAF50", 
-                                 hover_color="#45a049",
-                                 font=("Arial", 11))
-    btn_nova_just.pack(side="left")
-
-    # ========== CAMPOS ESPECIAIS DINÂMICOS ==========
-    frame_especiais = ctk.CTkFrame(scrollable_frame)
-    frame_especiais.pack(pady=10, fill="x", padx=10)
-
-    # Variáveis para campos especiais
-    label_especial = ctk.CTkLabel(frame_especiais, text="", font=("Arial", 12, "bold"))
-    entry_especial = ctk.CTkEntry(frame_especiais, 
-                                 width=300, 
-                                 height=35,
-                                 font=("Arial", 12))
-    label_info = ctk.CTkLabel(frame_especiais, text="", font=("Arial", 11), text_color="gray")
-
-    def mostrar_campos_especiais(justificativa):
-        """Mostra campos especiais baseado na justificativa selecionada."""
-        # Esconde todos os campos primeiro
-        label_especial.pack_forget()
-        entry_especial.pack_forget()
-        label_info.pack_forget()
-        entry_especial.delete(0, "end")
+class GerenciadorFrequencia:
+    def __init__(self, root, atualizar_lista=None):
+        self.root = root
+        self.atualizar_lista = atualizar_lista
+        self.janela = None
+        self.conn = None
+        self.cursor = None
+        self.funcionario_selecionado = None
         
-        if justificativa == "Licença-Prêmio":
-            label_especial.configure(text="Período (DD/MM/AAAA a DD/MM/AAAA):")
-            entry_especial.configure(placeholder_text="Ex: 15/08/2025 a 20/08/2025")
-            label_info.configure(text="Informe o período completo da licença")
+    def abrir_tela(self):
+        """Abre a janela de forma simples e rápida"""
+        self.janela = ctk.CTkToplevel(self.root)
+        self.janela.title("Registro de Faltas")
+        self.janela.geometry("700x500")
+        self.janela.minsize(700, 500)
+        self.janela.transient(self.root)
+        self.janela.grab_set()
+        
+        # Conexão com banco
+        self.conn = conectar()
+        self.cursor = self.conn.cursor()
+        
+        # Verificar e criar coluna detalhes se necessário
+        self._verificar_coluna_detalhes()
+        
+        # Carregar dados
+        self._carregar_dados()
+        
+        # Criar interface
+        self._criar_interface()
+        self.entry_pesquisa.focus()
+        
+    def _verificar_coluna_detalhes(self):
+        """Verifica e cria a coluna detalhes se não existir"""
+        try:
+            self.cursor.execute("PRAGMA table_info(frequencia)")
+            colunas = [col[1] for col in self.cursor.fetchall()]
+            if 'detalhes' not in colunas:
+                self.cursor.execute("ALTER TABLE frequencia ADD COLUMN detalhes TEXT")
+                self.conn.commit()
+                print("Coluna 'detalhes' adicionada à tabela frequencia")
+        except Exception as e:
+            print(f"Erro ao verificar coluna detalhes: {e}")
+
+    def _carregar_dados(self):
+        """Carrega dados básicos"""
+        self.cursor.execute("SELECT id, nome FROM funcionarios ORDER BY nome")
+        self.funcionarios = self.cursor.fetchall()
+        
+        if not self.funcionarios:
+            messagebox.showwarning("Aviso", "Nenhum funcionário cadastrado!")
+            self.janela.destroy()
+            return
             
-            label_especial.pack(anchor="w", pady=(10, 5))
-            entry_especial.pack(anchor="w", pady=(0, 5), fill="x")
-            label_info.pack(anchor="w")
-            
-        elif justificativa == "FH":
-            label_especial.configure(text="Horas de Falta:")
-            entry_especial.configure(placeholder_text="Ex: 1h30min ou 2h ou 45min")
-            label_info.configure(text="Use formato: XhYmin (ex: 1h30min, 2h, 45min)")
-            
-            label_especial.pack(anchor="w", pady=(10, 5))
-            entry_especial.pack(anchor="w", pady=(0, 5), fill="x")
-            label_info.pack(anchor="w")
+        self.justificativas = ["AM", "AB", "TRE", "SOL", "Declaração", "INJ", "FH", "Folga Aniversário", "Atestado", "Falta Justificada", "Licença-Prêmio"]
 
-    # ========== TABELA DE FALTAS REGISTRADAS ==========
-    frame_tabela_faltas = ctk.CTkFrame(scrollable_frame)
-    frame_tabela_faltas.pack(pady=15, fill="x", padx=10)
+    def _criar_interface(self):
+        """Interface simples e funcional"""
+        main_frame = ctk.CTkFrame(self.janela)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Título
+        ctk.CTkLabel(main_frame, text="REGISTRO DE FALTAS", 
+                    font=("Arial", 14, "bold")).pack(pady=5)
+        
+        # === SELEÇÃO DE FUNCIONÁRIO ===
+        frame_selecao = ctk.CTkFrame(main_frame)
+        frame_selecao.pack(fill="x", pady=5)
+        
+        self.entry_pesquisa = ctk.CTkEntry(frame_selecao, placeholder_text="🔍 Pesquisar funcionário...")
+        self.entry_pesquisa.pack(fill="x", pady=2)
+        self.entry_pesquisa.bind("<KeyRelease>", self._filtrar_funcionarios)
+        
+        # Lista de funcionários
+        frame_lista = ctk.CTkFrame(frame_selecao, height=100)
+        frame_lista.pack(fill="x", pady=2)
+        frame_lista.pack_propagate(False)
+        
+        self.lista_funcionarios = Listbox(frame_lista, font=("Arial", 9), height=5)
+        scroll_func = ttk.Scrollbar(frame_lista, command=self.lista_funcionarios.yview)
+        self.lista_funcionarios.configure(yscrollcommand=scroll_func.set)
+        
+        self.lista_funcionarios.pack(side="left", fill="both", expand=True)
+        scroll_func.pack(side="right", fill="y")
+        self.lista_funcionarios.bind("<<ListboxSelect>>", self._selecionar_funcionario)
+        
+        # === FORMULÁRIO SIMPLES ===
+        frame_form = ctk.CTkFrame(main_frame)
+        frame_form.pack(fill="x", pady=5)
+        
+        # Linha 1 - Data
+        frame_data = ctk.CTkFrame(frame_form)
+        frame_data.pack(fill="x", pady=2)
+        
+        ctk.CTkLabel(frame_data, text="Data:", width=40).pack(side="left")
+        self.entry_data = ctk.CTkEntry(frame_data, placeholder_text="DD/MM/AAAA", width=100)
+        self.entry_data.pack(side="left", padx=5)
+        
+        btn_hoje = ctk.CTkButton(frame_data, text="Hoje", width=50, command=self._data_hoje)
+        btn_hoje.pack(side="left", padx=2)
+        
+        # Linha 2 - Justificativa
+        frame_just = ctk.CTkFrame(frame_form)
+        frame_just.pack(fill="x", pady=2)
+        
+        ctk.CTkLabel(frame_just, text="Justificativa:", width=80).pack(side="left")
+        self.combo_just = ctk.CTkComboBox(frame_just, values=self.justificativas, width=150)
+        self.combo_just.set("AM")
+        self.combo_just.pack(side="left", padx=5)
+        
+        # Botões principais
+        frame_botoes = ctk.CTkFrame(frame_form)
+        frame_botoes.pack(fill="x", pady=10)
+        
+        ctk.CTkButton(frame_botoes, text="SALVAR FALTA", command=self._salvar_falta,
+                     fg_color="#27ae60", width=120, height=35).pack(side="left", padx=5)
+        ctk.CTkButton(frame_botoes, text="LIMPAR", command=self._limpar,
+                     fg_color="#7f8c8d", width=80, height=35).pack(side="left", padx=5)
+        ctk.CTkButton(frame_botoes, text="NOVA JUSTIF.", command=self._nova_justificativa,
+                     fg_color="#3498db", width=100, height=35).pack(side="left", padx=5)
+        
+        # === LISTA DE FALTAS ===
+        frame_faltas = ctk.CTkFrame(main_frame)
+        frame_faltas.pack(fill="both", expand=True, pady=5)
+        
+        ctk.CTkLabel(frame_faltas, text="FALTAS REGISTRADAS:", 
+                    font=("Arial", 11, "bold")).pack(anchor="w")
+        
+        # Tabela de faltas
+        self.tree_faltas = ttk.Treeview(frame_faltas, columns=("data", "justificativa", "detalhes"), 
+                                       show="headings", height=8)
+        self.tree_faltas.heading("data", text="Data")
+        self.tree_faltas.heading("justificativa", text="Justificativa")
+        self.tree_faltas.heading("detalhes", text="Detalhes")
+        
+        self.tree_faltas.column("data", width=80, anchor="center")
+        self.tree_faltas.column("justificativa", width=100, anchor="center")
+        self.tree_faltas.column("detalhes", width=150, anchor="center")
+        
+        scroll_faltas = ttk.Scrollbar(frame_faltas, command=self.tree_faltas.yview)
+        self.tree_faltas.configure(yscrollcommand=scroll_faltas.set)
+        
+        self.tree_faltas.pack(side="left", fill="both", expand=True)
+        scroll_faltas.pack(side="right", fill="y")
+        
+        # Botão excluir
+        ctk.CTkButton(frame_faltas, text="EXCLUIR FALTA SELECIONADA", 
+                     command=self._excluir_falta, fg_color="#e74c3c", width=180, height=30).pack(pady=5)
+        
+        # Inicializar
+        self._atualizar_lista_funcionarios()
+        self.janela.protocol("WM_DELETE_WINDOW", self._fechar)
 
-    ctk.CTkLabel(frame_tabela_faltas, text="Faltas Registradas:", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 8))
+    def _atualizar_lista_funcionarios(self, filtro=""):
+        """Atualiza lista de funcionários"""
+        self.lista_funcionarios.delete(0, "end")
+        for func_id, nome in self.funcionarios:
+            if not filtro or filtro.lower() in nome.lower():
+                self.lista_funcionarios.insert("end", nome)
 
-    # Frame para a tabela com scroll própria
-    frame_tabela_container = ctk.CTkFrame(frame_tabela_faltas)
-    frame_tabela_container.pack(fill="x", pady=5)
+    def _filtrar_funcionarios(self, event=None):
+        """Filtra funcionários em tempo real"""
+        self._atualizar_lista_funcionarios(self.entry_pesquisa.get())
 
-    tree_faltas = ttk.Treeview(frame_tabela_container, 
-                              columns=("data", "justificativa", "detalhes"), 
-                              show="headings", 
-                              height=6)
-    tree_faltas.heading("data", text="Data")
-    tree_faltas.heading("justificativa", text="Justificativa")
-    tree_faltas.heading("detalhes", text="Detalhes")
-    tree_faltas.column("data", width=120, anchor="center")
-    tree_faltas.column("justificativa", width=150, anchor="center")
-    tree_faltas.column("detalhes", width=250, anchor="center")
-    tree_faltas.pack(side="left", fill="both", expand=True)
-
-    scrollbar_faltas = ttk.Scrollbar(frame_tabela_container, orient="vertical", command=tree_faltas.yview)
-    scrollbar_faltas.pack(side="right", fill="y")
-    tree_faltas.configure(yscrollcommand=scrollbar_faltas.set)
-
-    # ========== FUNÇÕES ==========
-    funcionario_selecionado = {"id": None, "nome": None}
-
-    def atualizar_lista_funcionarios(pesquisa=""):
-        """Atualiza a lista de funcionários baseada na pesquisa."""
-        for item in tree_funcs.get_children():
-            tree_funcs.delete(item)
-            
-        for func in funcs:
-            nome = func[1]
-            if pesquisa.lower() in nome.lower():
-                tree_funcs.insert("", "end", text=nome, values=(nome,), tags=(func[0],))
-
-    def on_funcionario_selecionado(event):
-        """Quando um funcionário é selecionado na lista."""
-        selection = tree_funcs.selection()
+    def _selecionar_funcionario(self, event):
+        """Seleciona funcionário"""
+        selection = self.lista_funcionarios.curselection()
         if selection:
-            item = tree_funcs.item(selection[0])
-            funcionario_selecionado["id"] = item["tags"][0]
-            funcionario_selecionado["nome"] = item["text"]
-            carregar_faltas_funcionario()
+            nome = self.lista_funcionarios.get(selection[0])
+            for func_id, func_nome in self.funcionarios:
+                if func_nome == nome:
+                    self.funcionario_selecionado = {"id": func_id, "nome": nome}
+                    self._carregar_faltas()
+                    break
 
-    def carregar_faltas_funcionario():
-        """Carrega as faltas do funcionário selecionado."""
-        for item in tree_faltas.get_children():
-            tree_faltas.delete(item)
+    def _carregar_faltas(self):
+        """Carrega faltas do funcionário"""
+        if not self.funcionario_selecionado:
+            return
             
-        if funcionario_selecionado["id"]:
-            try:
-                cursor.execute("SELECT data, justificativa, detalhes FROM frequencia WHERE funcionario_id=? ORDER BY data DESC", 
-                              (funcionario_selecionado["id"],))
-                for row in cursor.fetchall():
-                    # Se detalhes for None, mostra string vazia
-                    detalhes = row[2] if row[2] else ""
-                    tree_faltas.insert("", "end", values=(row[0], row[1], detalhes))
-            except Exception as e:
-                print(f"Erro ao carregar faltas: {e}")
-                # Fallback para versão antiga sem coluna detalhes
-                try:
-                    cursor.execute("SELECT data, justificativa FROM frequencia WHERE funcionario_id=? ORDER BY data DESC", 
-                                  (funcionario_selecionado["id"],))
-                    for row in cursor.fetchall():
-                        tree_faltas.insert("", "end", values=(row[0], row[1], ""))
-                except Exception as e2:
-                    print(f"Erro no fallback: {e2}")
-
-    def adicionar_justificativa():
-        """Abre janela para adicionar nova justificativa."""
-        janela_just = ctk.CTkToplevel(janela)
-        janela_just.geometry("450x250")
-        janela_just.title("Nova Justificativa")
-        janela_just.transient(janela)
-        janela_just.grab_set()
-        janela_just.resizable(False, False)  # Não redimensionável
-        
-        ctk.CTkLabel(janela_just, text="Nova Justificativa:", 
-                    font=("Arial", 16, "bold")).pack(pady=20)
-        
-        entry_nova_just = ctk.CTkEntry(janela_just, 
-                                      width=350, 
-                                      height=40,
-                                      placeholder_text="Digite a nova justificativa...", 
-                                      font=("Arial", 12))
-        entry_nova_just.pack(pady=15)
-        entry_nova_just.focus()
-        
-        def salvar_justificativa():
-            nova_just = entry_nova_just.get().strip()
-            if not nova_just:
-                tk_messagebox.showwarning("Aviso", "Digite uma justificativa!")
-                return
-                
-            if nova_just in justificativas_completas:
-                tk_messagebox.showwarning("Aviso", "Esta justificativa já existe!")
-                return
-                
-            try:
-                cursor.execute("CREATE TABLE IF NOT EXISTS justificativas_personalizadas (id INTEGER PRIMARY KEY, nome TEXT UNIQUE)")
-                cursor.execute("INSERT OR IGNORE INTO justificativas_personalizadas (nome) VALUES (?)", (nova_just,))
-                conn.commit()
-                
-                justificativas_completas.append(nova_just)
-                combo_just.configure(values=justificativas_completas)
-                combo_just.set(nova_just)
-                
-                tk_messagebox.showinfo("Sucesso", "Justificativa adicionada com sucesso!")
-                janela_just.destroy()
-                
-            except Exception as e:
-                tk_messagebox.showerror("Erro", f"Erro ao salvar justificativa:\n{e}")
-        
-        frame_btn_just = ctk.CTkFrame(janela_just)
-        frame_btn_just.pack(pady=20)
-        
-        ctk.CTkButton(frame_btn_just, text="SALVAR", 
-                     command=salvar_justificativa,
-                     fg_color="green", 
-                     hover_color="darkgreen",
-                     width=120,
-                     height=35).pack(side="left", padx=10)
-        
-        ctk.CTkButton(frame_btn_just, text="CANCELAR", 
-                     command=janela_just.destroy,
-                     fg_color="gray", 
-                     hover_color="darkgray",
-                     width=120,
-                     height=35).pack(side="left", padx=10)
-
-    def validar_periodo_licenca(periodo):
-        """Valida o formato do período da licença."""
-        padrao = r'^\d{2}/\d{2}/\d{4} a \d{2}/\d{2}/\d{4}$'
-        return re.match(padrao, periodo) is not None
-
-    def validar_horas_falta(horas):
-        """Valida o formato das horas de falta."""
-        padrao = r'^(\d+h(\d+min)?|\d+min)$'
-        if re.match(padrao, horas):
-            return True
-        return False
-
-    def salvar_falta():
-        """Salva uma nova falta."""
-        if not funcionario_selecionado["id"]:
-            safe_messagebox("error", "Erro", "Selecione um funcionário!")
-            return
-
-        data = entry_data.get().strip()
-        just = combo_just.get()
-        detalhes = entry_especial.get().strip()
-
-        if not data or not just:
-            safe_messagebox("error", "Erro", "Preencha todos os campos!")
-            return
-
-        # Valida data
-        if len(data) != 10 or data[2] != "/" or data[5] != "/":
-            safe_messagebox("error", "Erro", "Data deve ser DD/MM/AAAA!")
-            return
-
-        # Validações especiais
-        if just == "Licença-Prêmio":
-            if not detalhes:
-                safe_messagebox("error", "Erro", "Informe o período da licença!")
-                return
-            if not validar_periodo_licenca(detalhes):
-                safe_messagebox("error", "Erro", "Período deve ser: DD/MM/AAAA a DD/MM/AAAA")
-                return
-        
-        elif just == "FH":
-            if not detalhes:
-                safe_messagebox("error", "Erro", "Informe as horas de falta!")
-                return
-            if not validar_horas_falta(detalhes):
-                safe_messagebox("error", "Erro", "Formato inválido! Use: 1h30min, 2h, 45min")
-                return
-
+        self.tree_faltas.delete(*self.tree_faltas.get_children())
+            
         try:
-            # Verifica duplicidade
-            cursor.execute("SELECT id FROM frequencia WHERE funcionario_id=? AND data=?", 
-                          (funcionario_selecionado["id"], data))
-            if cursor.fetchone():
-                safe_messagebox("warn", "Aviso", "Já existe falta nesta data!")
-                return
-
-            # Insere no banco
-            cursor.execute("INSERT INTO frequencia (funcionario_id, data, justificativa, detalhes) VALUES (?, ?, ?, ?)", 
-                          (funcionario_selecionado["id"], data, just, detalhes if detalhes else None))
-            conn.commit()
+            # Tenta carregar com a coluna detalhes
+            self.cursor.execute(
+                "SELECT data, justificativa, detalhes FROM frequencia WHERE funcionario_id = ? ORDER BY data DESC",
+                (self.funcionario_selecionado["id"],)
+            )
             
-            safe_messagebox("success", "Sucesso", "Falta registrada!")
-            entry_data.delete(0, "end")
-            entry_especial.delete(0, "end")
-            carregar_faltas_funcionario()
-            if atualizar_lista:
-                root.after(200, atualizar_lista)
+            for data, just, detalhes in self.cursor.fetchall():
+                detalhes_str = detalhes if detalhes else ""
+                self.tree_faltas.insert("", "end", values=(data, just, detalhes_str))
                 
         except Exception as e:
-            safe_messagebox("error", "Erro", f"Erro ao salvar:\n{e}")
-
-    def apagar_falta():
-        """Apaga a falta selecionada."""
-        if not funcionario_selecionado["id"]:
-            safe_messagebox("error", "Erro", "Selecione um funcionário!")
-            return
-
-        sel = tree_faltas.selection()
-        if not sel:
-            safe_messagebox("warn", "Aviso", "Selecione uma falta!")
-            return
-
-        data = tree_faltas.item(sel[0])["values"][0]
-        justificativa = tree_faltas.item(sel[0])["values"][1]
-        
-        if tk_messagebox.askyesno("Confirmar", f"Apagar falta de {data} - {justificativa}?"):
+            # Fallback para versão sem coluna detalhes
             try:
-                cursor.execute("DELETE FROM frequencia WHERE funcionario_id=? AND data=?", 
-                              (funcionario_selecionado["id"], data))
-                conn.commit()
-                carregar_faltas_funcionario()
-                if atualizar_lista:
-                    root.after(200, atualizar_lista)
-                safe_messagebox("success", "Sucesso", "Falta apagada!")
-            except Exception as e:
-                safe_messagebox("error", "Erro", f"Erro ao apagar:\n{e}")
+                self.cursor.execute(
+                    "SELECT data, justificativa FROM frequencia WHERE funcionario_id = ? ORDER BY data DESC",
+                    (self.funcionario_selecionado["id"],)
+                )
+                
+                for data, just in self.cursor.fetchall():
+                    self.tree_faltas.insert("", "end", values=(data, just, ""))
+            except Exception as e2:
+                print(f"Erro ao carregar faltas (fallback): {e2}")
 
-    # ========== CONFIGURAR EVENTOS ==========
-    entry_pesquisa.bind("<KeyRelease>", lambda e: atualizar_lista_funcionarios(entry_pesquisa.get().strip()))
-    tree_funcs.bind("<<TreeviewSelect>>", on_funcionario_selecionado)
+    def _perguntar_horas_fh(self):
+        """Pergunta quantas horas descontar para FH"""
+        dialog = ctk.CTkInputDialog(
+            text="Quantas horas de falta?\n\nExemplos:\n• 2h (2 horas)\n• 1h30min (1 hora e 30 minutos)\n• 45min (45 minutos)",
+            title="Horas de Falta - FH"
+        )
+        
+        horas_texto = dialog.get_input()
+        
+        if horas_texto and horas_texto.strip():
+            horas_texto = horas_texto.strip()
+            
+            # Validar formato
+            if not re.match(r'^(\d+h(\d+min)?|\d+min)$', horas_texto):
+                messagebox.showwarning("Formato inválido", 
+                    "Use um destes formatos:\n• 2h (2 horas)\n• 1h30min (1h30min)\n• 45min (45 minutos)")
+                return None
+                
+            return horas_texto
+        return None
 
-    # Monitora mudanças na combobox
-    def on_justificativa_change(*args):
-        mostrar_campos_especiais(combo_just.get())
-    
-    combo_just.bind("<<ComboboxSelected>>", on_justificativa_change)
-    combo_just.bind("<KeyRelease>", on_justificativa_change)
-
-    # ========== BOTÕES ==========
-    frame_botoes = ctk.CTkFrame(scrollable_frame)
-    frame_botoes.pack(pady=20, fill="x", padx=10)
-
-    ctk.CTkButton(frame_botoes, text="SALVAR FALTA", 
-                  command=salvar_falta,
-                  fg_color="green", 
-                  hover_color="darkgreen", 
-                  width=160, 
-                  height=40,
-                  font=("Arial", 12, "bold")).pack(side="left", padx=15)
-    
-    ctk.CTkButton(frame_botoes, text="APAGAR FALTA", 
-                  command=apagar_falta,
-                  fg_color="red", 
-                  hover_color="darkred", 
-                  width=160, 
-                  height=40,
-                  font=("Arial", 12, "bold")).pack(side="left", padx=15)
-    
-    ctk.CTkButton(frame_botoes, text="FECHAR", 
-                  command=lambda: janela.after(150, janela.destroy),
-                  fg_color="gray", 
-                  hover_color="darkgray", 
-                  width=160, 
-                  height=40,
-                  font=("Arial", 12, "bold")).pack(side="left", padx=15)
-
-    # ========== INICIALIZAÇÃO ==========
-    atualizar_lista_funcionarios()  # Carrega todos os funcionários inicialmente
-    mostrar_campos_especiais("AM")  # Inicializa campos especiais
-
-    def fechar_seguro():
-        """Fecha a janela de forma segura."""
+    def _perguntar_periodo_licenca(self, data_inicio):
+        """Pergunta até que dia vai a licença"""
         try:
-            conn.close()
-            janela.destroy()
+            # Converter data de início
+            data_obj = datetime.strptime(data_inicio, "%d/%m/%Y")
+            data_sugerida = data_obj + timedelta(days=4)  # Sugere 5 dias no total
+            
+            dialog = ctk.CTkInputDialog(
+                text=f"Licença começando em {data_inicio}\n\nAté que dia vai a licença? (DD/MM/AAAA)\n\nSugestão: {data_sugerida.strftime('%d/%m/%Y')}",
+                title="Período da Licença"
+            )
+            
+            data_fim = dialog.get_input()
+            
+            if data_fim and data_fim.strip():
+                data_fim = data_fim.strip()
+                
+                # Validar data
+                if not re.match(r'^\d{2}/\d{2}/\d{4}$', data_fim):
+                    messagebox.showwarning("Data inválida", "Data deve estar no formato DD/MM/AAAA")
+                    return None
+                    
+                # Verificar se data fim é depois da data início
+                data_fim_obj = datetime.strptime(data_fim, "%d/%m/%Y")
+                if data_fim_obj < data_obj:
+                    messagebox.showwarning("Data inválida", "Data de término deve ser após a data de início")
+                    return None
+                    
+                return data_fim
+                
+        except ValueError:
+            messagebox.showwarning("Data inválida", "Data em formato incorreto")
+            
+        return None
+
+    def _data_hoje(self):
+        """Preenche com data atual"""
+        self.entry_data.delete(0, "end")
+        self.entry_data.insert(0, datetime.now().strftime("%d/%m/%Y"))
+
+    def _nova_justificativa(self):
+        """Adiciona nova justificativa"""
+        nova = simpledialog.askstring("Nova Justificativa", "Digite a nova justificativa:")
+        if nova and nova.strip():
+            nova = nova.strip()
+            if nova not in self.justificativas:
+                self.justificativas.append(nova)
+                self.combo_just.configure(values=self.justificativas)
+                self.combo_just.set(nova)
+                messagebox.showinfo("Sucesso", "Justificativa adicionada!")
+
+    def _validar_dados_basicos(self):
+        """Validação básica dos dados"""
+        if not self.funcionario_selecionado:
+            return False, "Selecione um funcionário!"
+            
+        data = self.entry_data.get().strip()
+        if not data:
+            return False, "Informe a data!"
+            
+        if not re.match(r'^\d{2}/\d{2}/\d{4}$', data):
+            return False, "Data deve ser DD/MM/AAAA!"
+            
+        justificativa = self.combo_just.get()
+        if not justificativa:
+            return False, "Selecione uma justificativa!"
+            
+        return True, data, justificativa
+
+    def _salvar_falta(self):
+        """Salva falta com lógica inteligente"""
+        # Validação básica
+        resultado = self._validar_dados_basicos()
+        if not resultado[0]:
+            messagebox.showwarning("Aviso", resultado[1])
+            return
+            
+        valido, data, justificativa = resultado
+        
+        try:
+            detalhes = None
+            
+            # Lógica para FH - Perguntar horas
+            if justificativa == "FH":
+                horas_texto = self._perguntar_horas_fh()
+                if not horas_texto:
+                    return  # Usuário cancelou
+                detalhes = horas_texto
+                
+            # Lógica para Licença-Prêmio - Perguntar período
+            elif justificativa == "Licença-Prêmio":
+                data_fim = self._perguntar_periodo_licenca(data)
+                if not data_fim:
+                    return  # Usuário cancelou
+                
+                # Para Licença-Prêmio: salva apenas 1 linha com o período completo
+                detalhes = f"{data} a {data_fim}"
+                
+            # Salvar falta
+            if not self._salvar_falta_unica(data, justificativa, detalhes):
+                return
+                    
+            messagebox.showinfo("Sucesso", "Falta registrada!")
+            self._carregar_faltas()
+            self._limpar()
+            
+            if self.atualizar_lista:
+                self.root.after(50, self.atualizar_lista)
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao salvar: {e}")
+
+    def _salvar_falta_unica(self, data, justificativa, detalhes=None):
+        """Salva uma única falta no banco"""
+        try:
+            # Verificar duplicata
+            self.cursor.execute(
+                "SELECT id FROM frequencia WHERE funcionario_id = ? AND data = ?",
+                (self.funcionario_selecionado["id"], data)
+            )
+            
+            if self.cursor.fetchone():
+                messagebox.showwarning("Aviso", f"Já existe falta para {data}!")
+                return False
+                
+            # Inserir
+            self.cursor.execute(
+                "INSERT INTO frequencia (funcionario_id, data, justificativa, detalhes) VALUES (?, ?, ?, ?)",
+                (self.funcionario_selecionado["id"], data, justificativa, detalhes)
+            )
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao salvar falta: {e}")
+            return False
+
+    def _excluir_falta(self):
+        """Exclui falta selecionada"""
+        if not self.funcionario_selecionado:
+            messagebox.showwarning("Aviso", "Selecione um funcionário!")
+            return
+            
+        selection = self.tree_faltas.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione uma falta!")
+            return
+            
+        item = self.tree_faltas.item(selection[0])
+        data = item["values"][0]
+        justificativa = item["values"][1]
+        
+        if messagebox.askyesno("Confirmar", f"Excluir {justificativa} de {data}?"):
+            try:
+                self.cursor.execute(
+                    "DELETE FROM frequencia WHERE funcionario_id = ? AND data = ?",
+                    (self.funcionario_selecionado["id"], data)
+                )
+                self.conn.commit()
+                self._carregar_faltas()
+                if self.atualizar_lista:
+                    self.root.after(50, self.atualizar_lista)
+                messagebox.showinfo("Sucesso", "Falta excluída!")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao excluir: {e}")
+
+    def _limpar(self):
+        """Limpa formulário"""
+        self.entry_data.delete(0, "end")
+        self.combo_just.set("AM")
+
+    def _fechar(self):
+        """Fecha janela"""
+        try:
+            if self.conn:
+                self.conn.close()
+            if self.janela:
+                self.janela.destroy()
         except:
             pass
 
-    janela.protocol("WM_DELETE_WINDOW", fechar_seguro)
+
+def abrir_tela_frequencia(root, atualizar_lista=None):
+    """Função principal"""
+    app = GerenciadorFrequencia(root, atualizar_lista)
+    app.abrir_tela()
