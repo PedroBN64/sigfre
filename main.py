@@ -37,7 +37,7 @@ if __name__ == "__main__":
         # Configurações básicas da janela
         root.title("SIGFRE - Sistema de Folha")
         root.geometry("1100x700")
-        root.minsize(1000, 600)
+        root.minsize(1000, 600) # Tamanho mínimo da janela
         
         # Centralizar na tela
         root.update_idletasks()
@@ -46,10 +46,10 @@ if __name__ == "__main__":
         window_width = 1100
         window_height = 700
         
-        x = (screen_width // 2) - (window_width // 2)
-        y = (screen_height // 2) - (window_height // 2)
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
         
-        root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        root.geometry(f"{window_width}x{window_height}+{x}+{y}")    
         
         print("✅ Janela principal criada...")
         

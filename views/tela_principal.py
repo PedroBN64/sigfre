@@ -8,6 +8,17 @@ from tkinter import ttk, Menu
 from ttkthemes import ThemedStyle
 import tkinter.messagebox as tk_messagebox
 
+# Adicione esta importação no início do arquivo
+try:
+    from views.professores_eventuais import GerenciadorProfessoresEventuais
+except ImportError:
+    # Caso o módulo não exista ainda, cria uma função placeholder
+    def GerenciadorProfessoresEventuais(root):
+        class Placeholder:
+            def abrir_tela(self):
+                tk_messagebox.showinfo("Em Desenvolvimento", "Módulo de Professores Eventuais em desenvolvimento!")
+        return Placeholder()
+
 def atualizar_tabela(tree, conn, filtro=""):
     """Atualiza a tabela de funcionários."""
     for item in tree.get_children():
@@ -82,7 +93,7 @@ def criar_tela_principal(root):
                   command=lambda: (entry_filtro.delete(0, "end"), 
                                   atualizar_tabela(tree, get_conn()))).pack(side="right", padx=10)
 
-    # Botões principais
+    # Botões principais - ATUALIZADO COM PROFESSORES EVENTUAIS
     frame_botoes = ctk.CTkFrame(frame)
     frame_botoes.pack(pady=10, fill="x", padx=10)
 
@@ -111,21 +122,40 @@ def criar_tela_principal(root):
             except Exception as e2:
                 print(f"Erro crítico ao recriar conexão: {e2}")
 
-    ctk.CTkButton(frame_botoes, text="Cadastrar", 
+    # Primeira linha de botões
+    frame_botoes_linha1 = ctk.CTkFrame(frame_botoes)
+    frame_botoes_linha1.pack(fill="x", pady=5)
+
+    ctk.CTkButton(frame_botoes_linha1, text="Cadastrar", 
                   command=lambda: abrir_tela_cadastro(root, callback_atualizacao),
                   fg_color="#1f6aa5", hover_color="#16527c", width=160).pack(side="left", padx=10)
     
-    ctk.CTkButton(frame_botoes, text="Faltas", 
+    ctk.CTkButton(frame_botoes_linha1, text="Faltas", 
                   command=lambda: abrir_tela_frequencia(root, callback_atualizacao),
                   fg_color="#ff9800", hover_color="#cc7a00", width=160).pack(side="left", padx=10)
     
-    ctk.CTkButton(frame_botoes, text="Editar/Apagar", 
+    ctk.CTkButton(frame_botoes_linha1, text="Editar/Apagar", 
                   command=lambda: abrir_tela_editar(root, tree, get_conn(), callback_atualizacao),
                   fg_color="#9c27b0", hover_color="#7b1fa2", width=160).pack(side="left", padx=10)
     
-    ctk.CTkButton(frame_botoes, text="Gerar Folha", 
+    ctk.CTkButton(frame_botoes_linha1, text="Gerar Folha", 
                   command=lambda: abrir_janela_mes_ano(root),
                   fg_color="green", hover_color="darkgreen", width=160).pack(side="left", padx=10)
+
+    # Segunda linha de botões - NOVA LINHA PARA PROFESSORES EVENTUAIS
+    frame_botoes_linha2 = ctk.CTkFrame(frame_botoes)
+    frame_botoes_linha2.pack(fill="x", pady=5)
+
+    ctk.CTkButton(frame_botoes_linha2, text="Professores Eventuais", 
+                  command=lambda: abrir_professores_eventuais(),
+                  fg_color="#e67e22", hover_color="#bf6516", width=180, height=35,
+                  font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=10)
+
+    # Adicione esta função para abrir professores eventuais
+    def abrir_professores_eventuais():
+        """Abre a tela de gerenciamento de professores eventuais."""
+        gerenciador = GerenciadorProfessoresEventuais(root)
+        gerenciador.abrir_tela()
 
     # Tabela
     columns = ("nome", "rg", "cargo", "contrato", "carga_horaria")
